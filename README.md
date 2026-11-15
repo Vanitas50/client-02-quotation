@@ -13,3 +13,15 @@ Herkunftsnachweis: Git-Blob-Hashes identisch mit der Quelle; SHA-256 in `fixture
 (prüfen mit `shasum -a 256 -c fixtures/SHA256SUMS`).
 
 Diese Dateien werden nicht von Hand geändert.
+
+## Start und Tests
+
+Voraussetzung: Python 3.12. Laufzeit nur Standardbibliothek; `pytest` nur für Tests.
+
+```bash
+python -m pip install -r requirements.txt
+python quotation.py HP-BOX 50     # Angebot als JSON
+python -m pytest -q               # Produkttests (Q01, Q03, E01)
+```
+
+Das Produkt läuft ohne Factory und ohne LLM. Spezifikation: `issue_hp01.md`.
