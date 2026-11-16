@@ -60,54 +60,98 @@ def calculate_quote(items: list[dict], rule_version: str = "HP-V1") -> dict:
             message=str(e)
         ) from e
     
+    if not isinstance(items, list):
+        raise QuotationError(
+            reason="invalid_items_type",
+            message="items muss eine Liste sein."
+        )
+
+    if len(items) == 0:
+        raise QuotationError(
+            reason="empty_items",
+            message="Das Angebot muss mindestens eine Position enthalten."
+        )
+
+    if len(items) > 3:
+        raise QuotationError(
+            reason="too_many_items",
+            message="Ein Angebot darf höchstens 3 Positionen enthalten."
+        )
+
     goods_net_cents = 0
     shipping_cents = 0
     lines = []
-    
+    seen_skus: set[str] = set()
+
     for item in items:
-        # Validierung: 'sku' und 'quantity' müssen vorhanden sein
-        if "sku" not in item or "quantity" not in item:
+        if not isinstance(item, dict):
             raise QuotationError(
-                reason="missing_fields",
-                message="Jeder Artikel muss 'sku' und 'quantity' enthalten."
+                reason="invalid_item_format",
+                message="Jede Position muss ein Dictionary sein."
             )
-        
+
+        if "sku" not in item:
+            raise QuotationError(
+                reason="missing_sku",
+                message="Position enthält keine SKU."
+            )
+
+        if "quantity" not in item:
+            raise QuotationError(
+                reason="missing_quantity",
+                message="Position enthält keine Mengen-Angabe."
+            )
+
         sku = item["sku"]
         quantity = item["quantity"]
-        
-        # Validierung: Menge muss eine ganze Zahl sein (bool ist ungültig)
+
+        if sku in seen_skus:
+            raise QuotationError(
+                reason="duplicate_sku",
+                message=f"Doppelte SKU '{sku}' im Angebot nicht zulässig."
+            )
+        seen_skus.add(sku)
+
+        # Validierung: Menge darf kein bool sein
         if isinstance(quantity, bool):
             raise QuotationError(
-                reason="invalid_quantity_type",
+                reason="quantity_wrong_type",
                 message=f"Menge für {sku} ist kein gültiger Typ (bool)."
             )
-        
+
+        # Validierung: Menge darf keine Dezimalzahl/Bruchmenge sein
+        if isinstance(quantity, float):
+            raise QuotationError(
+                reason="quantity_not_integer",
+                message=f"Menge für {sku} darf keine Dezimalzahl/Bruchmenge sein."
+            )
+
         if not isinstance(quantity, int):
             raise QuotationError(
-                reason="invalid_quantity_type",
+                reason="quantity_wrong_type",
                 message=f"Menge für {sku} muss eine ganze Zahl sein."
             )
-        
+
         # Validierung: Menge im Bereich 1-10.000
         if quantity < 1 or quantity > 10000:
             raise QuotationError(
                 reason="quantity_out_of_range",
                 message=f"Menge für {sku} ({quantity}) liegt außerhalb des erlaubten Bereichs (1-10000)."
             )
-        
+
         # Produkt im Katalog finden
         if sku not in catalog:
             raise QuotationError(
-                reason="sku_not_found",
+                reason="unknown_sku",
                 message=f"SKU '{sku}' existiert nicht im Katalog."
             )
-        
+
         product = catalog[sku]
         unit_price_cents = product.get("unit_price_cents", 0)
-        
+
         # Listenbetrag berechnen
         list_amount_cents = quantity * unit_price_cents
-        
+
         # Rabattberechnung nach HP-V1 Regeln
         if 1 <= quantity <= 49:
             discount_percent = 0
@@ -115,14 +159,14 @@ def calculate_quote(items: list[dict], rule_version: str = "HP-V1") -> dict:
             discount_percent = 5
         else:  # >= 100
             discount_percent = 10
-        
-        # Rabattbetrag berechnen (ROUND_HALF_UP)
-        discount_cents = int((Decimal(list_amount_cents) * Decimal(discount_percent)) / Decimal(100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-        
+
+        # Rabattbetrag berechnen (ROUND_HALF_UP nach Kundenbriefing: (Listenbetrag * Rabattsatz + 50) // 100)
+        discount_cents = (list_amount_cents * discount_percent + 50) // 100
+
         # Netto berechnen
         net_cents = list_amount_cents - discount_cents
         goods_net_cents += net_cents
-        
+
         lines.append({
             "sku": sku,
             "quantity": quantity,
