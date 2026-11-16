@@ -19,10 +19,10 @@ Implementiere in `quotation.py` die deterministische Python-Berechnung für HP-B
 1. Geld nur als ganze Cent (`int`), keine Gleitkommazahlen.
 2. Listenbetrag = Menge × Einzelpreis.
 3. Rabatt auf den ganzen Listenbetrag der Position: 1–49 → 0 %, 50–99 → 5 %, ab 100 → 10 %.
-4. Rabattbetrag ROUND_HALF_UP: `(list_amount_cents * discount_percent + 50) // 100`.
+4. Rabattbetrag kaufmännisch gerundet (halber Cent wird aufgerundet), als Ganzzahlformel: `(list_amount_cents * discount_percent + 50) // 100`.
 5. Netto = Listenbetrag − Rabattbetrag; Warenwert = Summe Netto.
 6. HP-V1: Versand 1200 Cent bei Warenwert < 50000, sonst 0. Gesamt = Warenwert + Versand.
-7. Menge muss eine ganze Zahl 1–10.000 sein (`bool` ist ungültig); sonst `QuotationError("quantity_out_of_range", ...)` bzw. `"invalid_quantity_type"` bei Nicht-Ganzzahl.
+7. Menge muss eine ganze Zahl 1–10.000 sein (`bool` ist ungültig); sonst `QuotationError("quantity_out_of_range", ...)` bzw. `"quantity_wrong_type"` (falscher Typ) oder `"quantity_not_integer"` (keine ganze Zahl).
 
 ## Abnahme heute (eigene Produkttests in `test_quotation.py`)
 | Fall | Erwartung |
@@ -48,3 +48,10 @@ Implementiere in `quotation.py` die deterministische Python-Berechnung für HP-B
 - T6: Fachlogik Q01, Q03, E01 (HP-AC01 erster Stand, HP-AC02, HP-AC04 Teil).
 - T7: alle Q01–Q14 und E01–E10, Weboberfläche, JSON-Export, frischer Checkout, Release Candidate (HP-AC03–07).
 - T8: Reserve für Änderung CR-02 (HP-V2 Versand) und Release (HP-AC08–09).
+
+## Verantwortung
+- Kunde und Abnahme: Dozent in der Kundenrolle HansePack
+- Kunden-Issue und Anforderungen (Product Owner): Mehrose Farooq
+- Planung (Project Manager) sowie Produkttests und Freigabe des Produktdiffs (QA): Lars Boos
+- Architektur und Integration: David Pisarkiewicz
+- Fachlogik (Backend): Maxim Bers
