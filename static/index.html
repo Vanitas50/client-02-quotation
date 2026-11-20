@@ -1,8 +1,195 @@
 <!DOCTYPE html>
 <html lang="de">
-<head><meta charset="UTF-8" /><title>HansePack Angebotsrechner</title></head>
+<head>
+<meta charset="UTF-8" />
+<title>HansePack Angebotsrechner</title>
+<style>
+  body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .disclaimer { color: #666; font-style: italic; margin-bottom: 1.5rem; }
+  .form-group { margin-bottom: 1rem; }
+  label { display: block; margin-bottom: 0.25rem; font-weight: bold; }
+  select, input[type="text"] { width: 100%; padding: 0.5rem; box-sizing: border-box; }
+  .row-controls { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+  button { cursor: pointer; padding: 0.5rem 1rem; border: none; border-radius: 4px; font-size: 0.9rem; }
+  .btn-add { background-color: #28a745; color: white; }
+  .btn-remove { background-color: #dc3545; color: white; }
+  .btn-calc { background-color: #007bff; color: white; width: 100%; margin-top: 1rem; padding: 0.75rem; font-size: 1rem; }
+  .btn-download { background-color: #17a2b8; color: white; margin-top: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; display: none; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; font-size: 0.9rem; }
+  th { background-color: #f4f4f4; }
+  .error-msg { color: #dc3545; margin-top: 1rem; display: none; padding: 1rem; border: 1px solid #dc3545; border-radius: 4px; }
+</style>
+</head>
 <body>
   <h1>HansePack Angebotsrechner</h1>
-  <p>Nettobeträge – Lehrprojekt, kein verbindliches Angebot</p>
+  <p class="disclaimer">Nettobeträge – Lehrprojekt, kein verbindliches Angebot</p>
+
+  <div id="items-container"></div>
+  
+  <button class="btn-add" onclick="addItem()">+ Position</button>
+  <button class="btn-calc" onclick="calculateQuote()">Angebot berechnen</button>
+  <button class="btn-download" id="download-btn" style="display:none;" onclick="exportJSON()">JSON herunterladen</button>
+
+  <div id="error-msg" class="error-msg"></div>
+
+  <table id="result-table">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Menge</th>
+        <th>Einzelpreis (ct)</th>
+        <th>Listenbetrag (ct)</th>
+        <th>Rabatt (%)</th>
+        <th>Rabatt (ct)</th>
+        <th>Netto (ct)</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+
+  <div style="margin-top: 1rem; display:none;" id="totals-section">
+    <p><strong>Gesamt-Netto:</strong> <span id="goods-net">0</span> ct</p>
+    <p><strong>Versand:</strong> <span id="shipping">0</span> ct</p>
+    <p><strong>Gesamt:</strong> <span id="total">0</span> ct</p>
+  </div>
+
+  <script>
+    let items = [];
+
+    function addItem() {
+      if (items.length >= 3) return;
+      const div = document.createElement('div');
+      div.className = 'form-group';
+      div.innerHTML = `
+        <label for="sku-${items.length}">Produkt</label>
+        <select id="sku-${items.length}" onchange="updateItem(${items.length})">
+          <option value="HP-BOX">HP-BOX</option>
+          <option value="HP-TAPE">HP-TAPE</option>
+          <option value="HP-FILM">HP-FILM</option>
+        </select>
+        <label for="qty-${items.length}">Menge</label>
+        <input type="text" id="qty-${items.length}" placeholder="z.B. 10" oninput="updateItem(${items.length})">
+        <div class="row-controls">
+          <button class="btn-remove" onclick="removeItem(${items.length})">Entfernen</button>
+        </div>
+      `;
+      document.getElementById('items-container').appendChild(div);
+    }
+
+    function removeItem(index) {
+      const item = document.getElementById(`sku-${index}`);
+      if (item) item.parentElement.remove();
+      items.splice(index, 1);
+      // Re-index remaining inputs
+      for (let i = items.length; i < 3; i++) {
+        addItem();
+      }
+    }
+
+    function updateItem(index) {
+      const sku = document.getElementById(`sku-${index}`).value;
+      const qtyStr = document.getElementById(`qty-${index}`).value;
+      items[index] = { sku, qty: qtyStr };
+    }
+
+    async function calculateQuote() {
+      // Validate inputs
+      const validItems = [];
+      let errorMsg = '';
+      
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item.sku) continue;
+        const qtyStr = item.qty.trim();
+        if (!qtyStr) { errorMsg += 'Feld "Menge" ist leer. '; continue; }
+        // Keep as string for backend, but ensure no NaN
+        if (isNaN(qtyStr)) { errorMsg += `Ungültige Menge für ${item.sku}. `; continue; }
+        validItems.push({ sku: item.sku, quantity: qtyStr });
+      }
+
+      if (errorMsg) {
+        showError(errorMsg);
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: validItems, rule_version: 'HP-V1' })
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          showError(err.message || 'Fehler bei der Berechnung.');
+          return;
+        }
+
+        const data = await response.json();
+        displayResults(data);
+      } catch (e) {
+        showError('Netzwerkfehler oder Server nicht erreichbar.');
+      }
+    }
+
+    function displayResults(data) {
+      document.getElementById('result-table').style.display = 'table';
+      document.getElementById('download-btn').style.display = 'inline-block';
+      document.getElementById('totals-section').style.display = 'block';
+      
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '';
+      
+      data.items.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${item.sku}</td>
+          <td>${item.quantity}</td>
+          <td>${item.unit_price_cents}</td>
+          <td>${item.list_amount_cents}</td>
+          <td>${item.discount_percent}%</td>
+          <td>${item.discount_cents}</td>
+          <td>${item.net_cents}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('goods-net').textContent = data.goods_net_cents;
+      document.getElementById('shipping').textContent = data.shipping_cents;
+      document.getElementById('total').textContent = data.total_cents;
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    async function exportJSON() {
+      const payload = { items: items, rule_version: 'HP-V1' };
+      try {
+        const response = await fetch('/api/quote/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Export fehlgeschlagen');
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'hansepack-angebot-HP-V1.json';
+        a.click();
+        window.URL.revokeObjectURL(url);
+      } catch (e) {
+        alert('Fehler beim Herunterladen: ' + e.message);
+      }
+    }
+
+    // Initialize with one empty row
+    addItem();
+  </script>
 </body>
 </html>
