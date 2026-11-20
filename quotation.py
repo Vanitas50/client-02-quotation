@@ -153,9 +153,9 @@ def calculate_quote(items: list[dict], rule_version: str = "HP-V1") -> dict:
         list_amount_cents = quantity * unit_price_cents
 
         # Rabattberechnung nach HP-V1 Regeln
-        if 1 <= quantity <= 49:
+        if 1 <= quantity <= 50:
             discount_percent = 0
-        elif 50 <= quantity <= 99:
+        elif 51 <= quantity <= 99:
             discount_percent = 5
         else:  # >= 100
             discount_percent = 10
