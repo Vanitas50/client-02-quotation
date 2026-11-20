@@ -50,84 +50,78 @@
   </table>
 
   <div style="margin-top: 1rem; display:none;" id="totals-section">
-    <p><strong>Gesamt-Netto:</strong> <span id="goods-net">0</span> ct</p>
+    <p><strong>Währung / Regelversion:</strong> <span id="currency">EUR</span> / <span id="rule-version">HP-V1</span></p>
+    <p><strong>Warenwert (Netto):</strong> <span id="goods-net">0</span> ct</p>
     <p><strong>Versand:</strong> <span id="shipping">0</span> ct</p>
-    <p><strong>Gesamt:</strong> <span id="total">0</span> ct</p>
+    <p><strong>Gesamt (Netto):</strong> <span id="total">0</span> ct</p>
   </div>
 
   <script>
-    let items = [];
+    let catalogProducts = [
+      { sku: 'HP-BOX', name_de: 'Versandkarton', unit_price_cents: 250 },
+      { sku: 'HP-TAPE', name_de: 'Klebeband', unit_price_cents: 400 },
+      { sku: 'HP-FILM', name_de: 'Stretchfolie', unit_price_cents: 1250 }
+    ];
+    let lastValidPayload = null;
 
-    function addItem() {
-      if (items.length >= 3) return;
+    function parseQuantityRaw(raw) {
+      const trimmed = String(raw).trim();
+      if (trimmed === '') return '';
+      if (/^-?\d+$/.test(trimmed)) return Number(trimmed);
+      if (/^-?\d+\.\d+$/.test(trimmed)) return Number(trimmed);
+      return raw;
+    }
+
+    function addItem(defaultSku = 'HP-BOX', defaultQty = '50') {
+      const container = document.getElementById('items-container');
+      if (container.children.length >= 3) return;
       const div = document.createElement('div');
       div.className = 'form-group';
+      const optionsHtml = catalogProducts
+        .map(p => `<option value="${p.sku}" ${p.sku === defaultSku ? 'selected' : ''}>${p.sku} – ${p.name_de} (${p.unit_price_cents} ct)</option>`)
+        .join('');
       div.innerHTML = `
-        <label for="sku-${items.length}">Produkt</label>
-        <select id="sku-${items.length}" onchange="updateItem(${items.length})">
-          <option value="HP-BOX">HP-BOX</option>
-          <option value="HP-TAPE">HP-TAPE</option>
-          <option value="HP-FILM">HP-FILM</option>
-        </select>
-        <label for="qty-${items.length}">Menge</label>
-        <input type="text" id="qty-${items.length}" placeholder="z.B. 10" oninput="updateItem(${items.length})">
+        <label>Produkt</label>
+        <select class="sku-input">${optionsHtml}</select>
+        <label>Menge</label>
+        <input type="text" class="qty-input" value="${defaultQty}" placeholder="z.B. 50">
         <div class="row-controls">
-          <button class="btn-remove" onclick="removeItem(${items.length})">Entfernen</button>
+          <button type="button" class="btn-remove" onclick="removeItem(this)">Entfernen</button>
         </div>
       `;
-      document.getElementById('items-container').appendChild(div);
+      container.appendChild(div);
     }
 
-    function removeItem(index) {
-      const item = document.getElementById(`sku-${index}`);
-      if (item) item.parentElement.remove();
-      items.splice(index, 1);
-      // Re-index remaining inputs
-      for (let i = items.length; i < 3; i++) {
-        addItem();
-      }
+    function removeItem(btn) {
+      btn.closest('.form-group').remove();
     }
 
-    function updateItem(index) {
-      const sku = document.getElementById(`sku-${index}`).value;
-      const qtyStr = document.getElementById(`qty-${index}`).value;
-      items[index] = { sku, qty: qtyStr };
+    function collectPayload() {
+      const rows = document.querySelectorAll('#items-container .form-group');
+      const items = Array.from(rows).map(row => ({
+        sku: row.querySelector('.sku-input').value,
+        quantity: parseQuantityRaw(row.querySelector('.qty-input').value)
+      }));
+      return { items, rule_version: 'HP-V1' };
     }
 
     async function calculateQuote() {
-      // Validate inputs
-      const validItems = [];
-      let errorMsg = '';
-      
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item.sku) continue;
-        const qtyStr = item.qty.trim();
-        if (!qtyStr) { errorMsg += 'Feld "Menge" ist leer. '; continue; }
-        // Keep as string for backend, but ensure no NaN
-        if (isNaN(qtyStr)) { errorMsg += `Ungültige Menge für ${item.sku}. `; continue; }
-        validItems.push({ sku: item.sku, quantity: qtyStr });
-      }
-
-      if (errorMsg) {
-        showError(errorMsg);
-        return;
-      }
-
+      const payload = collectPayload();
       try {
         const response = await fetch('/api/quote', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: validItems, rule_version: 'HP-V1' })
+          body: JSON.stringify(payload)
         });
 
+        const data = await response.json();
         if (!response.ok) {
-          const err = await response.json();
-          showError(err.message || 'Fehler bei der Berechnung.');
+          const errObj = data.error || {};
+          showError(errObj.message || 'Fehler bei der Berechnung.');
           return;
         }
 
-        const data = await response.json();
+        lastValidPayload = payload;
         displayResults(data);
       } catch (e) {
         showError('Netzwerkfehler oder Server nicht erreichbar.');
@@ -135,61 +129,86 @@
     }
 
     function displayResults(data) {
+      document.getElementById('error-msg').style.display = 'none';
       document.getElementById('result-table').style.display = 'table';
       document.getElementById('download-btn').style.display = 'inline-block';
       document.getElementById('totals-section').style.display = 'block';
-      
+
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '';
-      
-      data.items.forEach(item => {
+
+      (data.lines || []).forEach(line => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${item.sku}</td>
-          <td>${item.quantity}</td>
-          <td>${item.unit_price_cents}</td>
-          <td>${item.list_amount_cents}</td>
-          <td>${item.discount_percent}%</td>
-          <td>${item.discount_cents}</td>
-          <td>${item.net_cents}</td>
+          <td>${line.sku}</td>
+          <td>${line.quantity}</td>
+          <td>${line.unit_price_cents}</td>
+          <td>${line.list_amount_cents}</td>
+          <td>${line.discount_percent}%</td>
+          <td>${line.discount_cents}</td>
+          <td>${line.net_cents}</td>
         `;
         tbody.appendChild(tr);
       });
 
+      document.getElementById('currency').textContent = data.currency;
+      document.getElementById('rule-version').textContent = data.rule_version;
       document.getElementById('goods-net').textContent = data.goods_net_cents;
       document.getElementById('shipping').textContent = data.shipping_cents;
       document.getElementById('total').textContent = data.total_cents;
     }
 
     function showError(msg) {
+      lastValidPayload = null;
+      document.getElementById('result-table').style.display = 'none';
+      document.getElementById('download-btn').style.display = 'none';
+      document.getElementById('totals-section').style.display = 'none';
       const el = document.getElementById('error-msg');
       el.textContent = msg;
       el.style.display = 'block';
     }
 
     async function exportJSON() {
-      const payload = { items: items, rule_version: 'HP-V1' };
+      if (!lastValidPayload) return;
       try {
         const response = await fetch('/api/quote/export', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(lastValidPayload)
         });
-        if (!response.ok) throw new Error('Export fehlgeschlagen');
+        if (!response.ok) {
+          const data = await response.json();
+          showError((data.error && data.error.message) || 'Export fehlgeschlagen');
+          return;
+        }
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = 'hansepack-angebot-HP-V1.json';
+        document.body.appendChild(a);
         a.click();
+        a.remove();
         window.URL.revokeObjectURL(url);
       } catch (e) {
-        alert('Fehler beim Herunterladen: ' + e.message);
+        showError('Fehler beim Herunterladen: ' + e.message);
       }
     }
 
-    // Initialize with one empty row
-    addItem();
+    async function init() {
+      try {
+        const resp = await fetch('/api/catalog');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data.products) && data.products.length > 0) {
+            catalogProducts = data.products;
+          }
+        }
+      } catch (_) {}
+      addItem('HP-BOX', '50');
+    }
+
+    init();
   </script>
 </body>
 </html>
