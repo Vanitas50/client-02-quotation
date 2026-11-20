@@ -195,6 +195,81 @@ def calculate_quote(items: list[dict], rule_version: str = "HP-V1") -> dict:
     }
 
 
+def build_export_payload(quote: dict) -> dict:
+    """
+    Erstellt ein konsistentes Export-Payload aus einem berechneten Angebot.
+    
+    Validiert, dass alle Pflichtfelder vorhanden sind und Geldwerte ganzzahlige Cent-Werte sind.
+    
+    Args:
+        quote: Das berechnete Angebots-Dictionary.
+    
+    Returns:
+        Ein validiertes Dictionary für den Export.
+    
+    Raises:
+        QuotationError: Wenn das Angebot ungültig ist (fehlende Felder oder falsche Typen).
+    """
+    required_fields = ["lines", "goods_net_cents", "shipping_cents", "total_cents", "currency", "rule_version"]
+    
+    # Prüfen, ob alle Pflichtfelder vorhanden sind
+    for field in required_fields:
+        if field not in quote:
+            raise QuotationError(
+                reason=f"missing_field",
+                message=f"Fehlendes Pflichtfeld: {field}"
+            )
+    
+    # Prüfen, ob Geldwerte ganzzahlige Cent-Werte sind (bool ist Unterklasse von int, muss explizit ausgeschlossen werden)
+    monetary_fields = ["goods_net_cents", "shipping_cents", "total_cents"]
+    for field in monetary_fields:
+        value = quote[field]
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise QuotationError(
+                reason="invalid_monetary_type",
+                message=f"Feld '{field}' muss ein ganzzahliges Integer-Wert sein (keine Floats oder Booleans)."
+            )
+    
+    # currency und rule_version sollten Strings sein
+    if not isinstance(quote["currency"], str):
+        raise QuotationError(
+            reason="invalid_currency_type",
+            message=f"Feld 'currency' muss ein String sein."
+        )
+    
+    if quote["rule_version"] != "HP-V1":
+        raise QuotationError(
+            reason="invalid_rule_version_in_payload",
+            message=f"Im Export-Payload ist nur die Regelversion 'HP-V1' erlaubt (aktuell: {quote['rule_version']})."
+        )
+    
+    # lines muss eine Liste von Dicts sein
+    if not isinstance(quote["lines"], list):
+        raise QuotationError(
+            reason="invalid_lines_type",
+            message=f"Feld 'lines' muss eine Liste sein."
+        )
+    
+    return quote
+
+
+def export_quote_json(quote: dict) -> str:
+    """
+    Serialisiert ein berechnetes Angebot als deterministisches JSON.
+    
+    Args:
+        quote: Das berechnete Angebots-Dictionary (wird intern validiert).
+    
+    Returns:
+        Eine JSON-String-Repräsentation des Angebots.
+    
+    Raises:
+        QuotationError: Wenn das Angebot ungültig ist.
+    """
+    payload = build_export_payload(quote)
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
 def main():
     """CLI-Schnittstelle."""
     if len(sys.argv) != 3:
@@ -213,7 +288,8 @@ def main():
     
     try:
         quote = calculate_quote(items)
-        print(json.dumps(quote, indent=2, ensure_ascii=False))
+        # Nutzung von export_quote_json für konsistente Ausgabe
+        print(export_quote_json(quote))
     except QuotationError as e:
         print(f"Fehler: {e.message}", file=sys.stderr)
         sys.exit(1)
